@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sarsan Advanced Stream App</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #fff; text-align: center; margin: 0; padding: 15px; }
+        .container { max-width: 600px; margin: auto; background: #1e293b; padding: 15px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }
+        .btn-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 10px 0; }
+        button { background: #10b981; color: #fff; border: none; padding: 10px 16px; font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; }
+        button:hover { background: #059669; }
+        .freeze-btn { background: #f59e0b; }
+        .freeze-btn:hover { background: #d97706; }
+        
+        .video-wrapper { position: relative; width: 100%; margin-top: 15px; }
+        video { width: 100%; max-height: 400px; background: #000; border: 2px solid #334155; border-radius: 8px; }
+        
+        /* Bilbila lammaffaa irratti tuqiinsi akka hin hojjenne cufuuf */
+        .locked-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            display: none;
+            background: transparent;
+        }
+        #status { font-size: 13px; color: #38bdf8; margin: 8px 0; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Sarsan Live Stream & Mirror</h2>
+        <div id="status">Haala: Walqunnamtii eeguurra jira...</div>
+        
+        <!-- Bultoniin Bilbila 1ffaa (Broadcaster) qofaaf mul'atan -->
+        <div id="controlPanel" style="display:none;">
+            <div class="btn-group">
+                <button id="shareScreenBtn">🖥️ Screen</button>
+                <button id="frontCamBtn">📷 Kaameraa Duraa</button>
+                <button id="backCamBtn">📸 Kaameraa Duuba</button>
+            </div>
+        </div>
+
+        <div class="btn-group">
+            <button id="freezeBtn" class="freeze-btn" style="display:none;">❄️️ Freeze / Unfreeze</button>
+        </div>
+        
+        <div class="video-wrapper">
+            <div id="touchLockOverlay" class="locked-overlay"></div>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const statusDiv = document.getElementById('status');
+        const controlPanel = document.getElementById('controlPanel');
+        const shareScreenBtn = document.getElementById('shareScreenBtn');
+        const frontCamBtn = document.getElementById('frontCamBtn');
+        const backCamBtn = document.getElementById('backCamBtn');
+        const freezeBtn = document.getElementById('freezeBtn');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const touchLockOverlay = document.getElementById('touchLockOverlay');
+
+        let localStream;
+        let peerConnection;
+        let isFrozen = false;
+
+        const servers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let roomId = urlParams.get('room');
+
+        if (!roomId) {
+            roomId = Math.random().toString(36).substring(2, 9);
+            window.history.pushState({}, '', `?room=${roomId}`);
+            
+            controlPanel.style.display = 'block';
+            freezeBtn.style.display = 'inline-block';
+            statusDiv.innerText = "Haala: Filannookeetiin Stream jalqabi.";
+            socket.emit('join-room', roomId, 'broadcaster');
+        } else {
+            statusDiv.innerText = "Haala: Bilbila 1ffaa waliin walqunnamaa jira...";
+            freezeBtn.style.display = 'inline-block';
+            // Bilbila lammaffaa irratti touch/click guutummaatti cufa
+            touchLockOverlay.style.display = 'block';
+            socket.emit('join-room', roomId, 'watcher');
+        }
+
+        async function startStream(constraints) {
+            try {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                }
+
+                localStream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+                    return await navigator.mediaDevices.getDisplayMedia(constraints);
+                });
+
+                remoteVideo.srcObject = localStream;
+                statusDiv.innerText = "Haala: Live Stream hojjechaa jira...";
+                
+                if (peerConnection) {
+                    const senders = peerConnection.getSenders();
+                    localStream.getTracks().forEach(track => {
+                        const sender = senders.find(s => s.track && s.track.kind === track.kind);
+                        if (sender) {
+                            sender.replaceTrack(track);
+                        } else {
+                            peerConnection.addTrack(track, localStream);
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error("Stream error:", err);
+                statusDiv.innerText = "Haala: Stream jalqabuu hin dandeenye.";
+            }
+        }
+
+        shareScreenBtn.addEventListener('click', async () => {
+            try {
+                localStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false });
+                remoteVideo.srcObject = localStream;
+                statusDiv.innerText = "Haala: Screen qoodamaa jira...";
+
+                if (peerConnection) {
+                    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                }
+            } catch (e) { console.error(e); }
+        });
+
+        frontCamBtn.addEventListener('click', () => {
+            startStream({ video: { facingMode: "user" }, audio: false });
+        });
+
+        backCamBtn.addEventListener('click', () => {
+            startStream({ video: { facingMode: { exact: "environment" } }, audio: false });
+        });
+
+        freezeBtn.addEventListener('click', () => {
+            isFrozen = !isFrozen;
+            if (isFrozen) {
+                remoteVideo.pause();
+                freezeBtn.innerText = "▶️ Unfreeze";
+                statusDiv.innerText = "Haala: Skiriiniin Fririiz ta'eera.";
+            } else {
+                remoteVideo.play();
+                freezeBtn.innerText = "❄️ Freeze";
+                statusDiv.innerText = "Haala: Skiriiniin deebi'ee hojjechaa jira.";
+            }
+        });
+
+        socket.on('watcher-joined', async (id) => {
+            statusDiv.innerText = "Haala: Bilbila lammaffaa waliin walqunnameera!";
+            peerConnection = new RTCPeerConnection(servers);
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            }
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', id, event.candidate);
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', id, peerConnection.localDescription);
+        });
+
+        socket.on('offer', async (id, description) => {
+            peerConnection = new RTCPeerConnection(servers);
+            await peerConnection.setRemoteDescription(description);
+
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', id, peerConnection.localDescription);
+
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+                statusDiv.innerText = "Haala: Live Stream guutummaatti argamaa jira!";
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', id, event.candidate);
+                }
+            };
+        });
+
+        socket.on('answer', async (id, description) => {
+            await peerConnection.setRemoteDescription(description);
+        });
+
+        socket.on('candidate', async (id, candidate) => {
+            try {
+                if (peerConnection) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+            } catch (e) {
+                console.error('ICE Candidate error:', e);
+            }
+        });
+    </script>
+</body>
+</html>
