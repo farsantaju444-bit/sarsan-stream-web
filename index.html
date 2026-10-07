@@ -12,6 +12,8 @@
         button:hover { background: #059669; }
         .freeze-btn { background: #f59e0b; }
         .freeze-btn:hover { background: #d97706; }
+        .copy-btn { background: #3b82f6; }
+        .copy-btn:hover { background: #2563eb; }
         
         .video-wrapper { position: relative; width: 100%; margin-top: 15px; }
         video { width: 100%; max-height: 400px; background: #000; border: 2px solid #334155; border-radius: 8px; }
@@ -25,6 +27,7 @@
             background: transparent;
         }
         #status { font-size: 13px; color: #38bdf8; margin: 8px 0; font-weight: bold; }
+        .room-box { background: #0f172a; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 14px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -33,6 +36,15 @@
         <h2>Sarsan Live Stream & Mirror</h2>
         <div id="status">Haala: Walqunnamtii eeguurra jira...</div>
         
+        <!-- Linkii fi Room ID kan bilbila lammaffaaf ergamu asitti mul'ata -->
+        <div id="roomInfoContainer" style="display:none;">
+            <div class="room-box">
+                <b>Linkii Bilbila 2ffaa:</b><br>
+                <span id="shareableLink"></span>
+            </div>
+            <button id="copyLinkBtn" class="copy-btn">📋 Linkii Copy Godhi</button>
+        </div>
+
         <!-- Bultoniin Bilbila 1ffaa (Broadcaster) qofaaf mul'atan -->
         <div id="controlPanel" style="display:none;">
             <div class="btn-group">
@@ -43,7 +55,7 @@
         </div>
 
         <div class="btn-group">
-            <button id="freezeBtn" class="freeze-btn" style="display:none;">❄️️ Freeze / Unfreeze</button>
+            <button id="freezeBtn" class="freeze-btn" style="display:none;">❄ Freeze / Unfreeze</button>
         </div>
         
         <div class="video-wrapper">
@@ -63,6 +75,9 @@
         const freezeBtn = document.getElementById('freezeBtn');
         const remoteVideo = document.getElementById('remoteVideo');
         const touchLockOverlay = document.getElementById('touchLockOverlay');
+        const roomInfoContainer = document.getElementById('roomInfoContainer');
+        const shareableLink = document.getElementById('shareableLink');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
 
         let localStream;
         let peerConnection;
@@ -84,6 +99,12 @@
             
             controlPanel.style.display = 'block';
             freezeBtn.style.display = 'inline-block';
+            roomInfoContainer.style.display = 'block';
+            
+            // Linkii guutuu bilbila lammaffaaf ta'u qopheessa
+            const fullLink = window.location.href;
+            shareableLink.innerText = fullLink;
+
             statusDiv.innerText = "Haala: Filannookeetiin Stream jalqabi.";
             socket.emit('join-room', roomId, 'broadcaster');
         } else {
@@ -93,6 +114,12 @@
             touchLockOverlay.style.display = 'block';
             socket.emit('join-room', roomId, 'watcher');
         }
+
+        copyLinkBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(shareableLink.innerText);
+            copyLinkBtn.innerText = "✅ Copied!";
+            setTimeout(() => { copyLinkBtn.innerText = "📋 Linkii Copy Godhi"; }, 2000);
+        });
 
         async function startStream(constraints) {
             try {
@@ -191,7 +218,7 @@
 
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    socket.emit('ice-candidate', id, event.candidate);
+                    socket.emit('ice-candidate', id, peerConnection.localDescription);
                 }
             };
         });
